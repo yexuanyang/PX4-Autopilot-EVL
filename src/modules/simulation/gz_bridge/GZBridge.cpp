@@ -906,7 +906,7 @@ bool GZBridge::callEntityFactoryService(const std::string &service, const gz::ms
 	bool result;
 	gz::msgs::Boolean rep;
 
-	if (_node.Request(service, req, 1000, rep, result)) {
+	if (_node.Request(service, req, 3000, rep, result)) {
 		if (!rep.data() || !result) {
 			PX4_ERR("EntityFactory service call failed.");
 			return false;

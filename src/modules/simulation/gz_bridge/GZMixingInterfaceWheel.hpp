@@ -42,7 +42,6 @@
 #include <uORB/PublicationMulti.hpp>
 #include <uORB/topics/wheel_encoders.h>
 
-
 // GZBridge mixing class for Wheels.
 // It is separate from GZBridge to have separate WorkItems and therefore allowing independent scheduling
 // All work items are expected to run on the same work queue.

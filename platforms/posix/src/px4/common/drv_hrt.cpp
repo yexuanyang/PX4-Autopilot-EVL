@@ -476,7 +476,7 @@ int px4_clock_gettime(clockid_t clk_id, struct timespec *tp)
 	}
 
 #endif // defined(ENABLE_LOCKSTEP_SCHEDULER)
-	return system_clock_gettime(clk_id, tp);
+	return system_clock_gettime(-clk_id, tp);
 
 }
 
@@ -484,7 +484,7 @@ int px4_clock_gettime(clockid_t clk_id, struct timespec *tp)
 int px4_clock_settime(clockid_t clk_id, const struct timespec *ts)
 {
 	if (clk_id == CLOCK_REALTIME) {
-		return system_clock_settime(clk_id, ts);
+		return system_clock_settime(-clk_id, ts);
 
 	} else {
 		lockstep_scheduler.set_absolute_time(ts_to_abstime(ts));
@@ -516,6 +516,18 @@ unsigned int px4_sleep(unsigned int seconds)
 	return lockstep_scheduler.usleep_until(time_finished);
 }
 
+#if defined(__PX4_EVL4)
+
+int px4_pthread_cond_timedwait(struct evl_event *cond,
+			       struct evl_mutex *mutex,
+			       const struct timespec *ts)
+{
+	const uint64_t scheduled = ts_to_abstime(ts);
+	return lockstep_scheduler.cond_timedwait(cond, mutex, scheduled);
+}
+
+#else
+
 int px4_pthread_cond_timedwait(pthread_cond_t *cond,
 			       pthread_mutex_t *mutex,
 			       const struct timespec *ts)
@@ -523,6 +535,8 @@ int px4_pthread_cond_timedwait(pthread_cond_t *cond,
 	const uint64_t scheduled = ts_to_abstime(ts);
 	return lockstep_scheduler.cond_timedwait(cond, mutex, scheduled);
 }
+
+#endif
 
 int px4_lockstep_register_component()
 {

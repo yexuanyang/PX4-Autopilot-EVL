@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2023 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2025 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,58 +30,44 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 #pragma once
 
-#include <lib/mixer_module/mixer_module.hpp>
+#include <string.h>
+#include <stdlib.h>
+#include <evl/proxy.h>
+#include <evl/sched.h>
+#include <evl/thread.h>
 
-#include <gz/msgs.hh>
-#include <gz/transport.hh>
+#define __stringify_1(x...)	#x
+#define __stringify(x...)	__stringify_1(x)
+#define evl_warn_failed(__fmt, __args...)			\
+	evl_eprintf("%s:%d: FAILED: " __fmt "\n",	\
+		    __FILE__, __LINE__, ##__args)
 
-#include <uORB/PublicationMulti.hpp>
-#include <uORB/topics/esc_status.h>
+#define __Tcall(__ret, __call)				\
+	({						\
+		(__ret) = (__call);			\
+		if (__ret < 0) {			\
+			evl_warn_failed("%s (=%s)",		\
+					__stringify(__call),	\
+					strerror(-(__ret)));	\
+		}					\
+		(__ret) >= 0;				\
+	})
 
-// GZBridge mixing class for ESCs.
-// It is separate from GZBridge to have separate WorkItems and therefore allowing independent scheduling
-// All work items are expected to run on the same work queue.
-class GZMixingInterfaceESC : public OutputModuleInterface
-{
-public:
-	static constexpr int MAX_ACTUATORS = MixingOutput::MAX_ACTUATORS;
+#define __Tcall_assert(__ret, __call)		\
+	do {					\
+		if (!__Tcall(__ret, __call))	\
+			exit(__ret);	\
+	} while (0)
 
-	GZMixingInterfaceESC(gz::transport::Node &node, pthread_mutex_t &node_mutex) :
-		OutputModuleInterface(MODULE_NAME "-actuators-esc", px4::wq_configurations::rate_ctrl),
-		_node(node),
-		_node_mutex(node_mutex)
-	{}
-
-	bool updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
-			   unsigned num_outputs, unsigned num_control_groups_updated) override;
-
-	MixingOutput &mixingOutput() { return _mixing_output; }
-
-	bool init(const std::string &model_name);
-
-	void stop()
-	{
-		_mixing_output.unregister();
-		ScheduleClear();
-	}
-
-private:
-	friend class GZBridge;
-
-	void Run() override;
-
-	void motorSpeedCallback(const gz::msgs::Actuators &actuators);
-
-	gz::transport::Node &_node;
-	pthread_mutex_t &_node_mutex;
-
-	MixingOutput _mixing_output{"SIM_GZ_EC", MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
-
-	gz::transport::Node::Publisher _actuators_pub;
-
-	uORB::Publication<esc_status_s> _esc_status_pub{ORB_ID(esc_status)};
-
-};
+// Attach to evl core and set thread name, scheduling policy and priority.
+#define __attach_and_setsched(__policy, __prio, __fmt, __args...)		\
+	do {								\
+		int __ret;						\
+		__Tcall_assert(__ret, evl_attach_self(__fmt, ##__args));	\
+		struct evl_sched_attrs __attrs;				\
+		__attrs.sched_policy = __policy;				\
+		__attrs.sched_priority = __prio;				\
+		__Tcall_assert(__ret, evl_set_schedattr(__ret, &__attrs));	\
+	} while (0)
