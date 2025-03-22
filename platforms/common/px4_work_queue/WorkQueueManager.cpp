@@ -49,6 +49,11 @@
 #include <limits.h>
 #include <string.h>
 
+#ifdef __PX4_EVL4
+#include <px4_platform_common/evl_helper.h>
+#include <evl/thread.h>
+#endif
+
 using namespace time_literals;
 
 namespace px4
@@ -229,6 +234,11 @@ const wq_config_t &ins_instance_to_wq(uint8_t instance)
 static void *
 WorkQueueRunner(void *context)
 {
+#ifdef __PX4_EVL4
+	// Attach to evl core
+	int eret;
+	__Tcall_assert(eret, evl_attach_self(nullptr));
+#endif
 	wq_config_t *config = static_cast<wq_config_t *>(context);
 	WorkQueue wq(*config);
 

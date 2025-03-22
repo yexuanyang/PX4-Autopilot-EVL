@@ -45,9 +45,16 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <errno.h>
+#include <string.h>
+
+#ifdef __PX4_EVL4
+#include <px4_platform_common/evl_helper.h>
+#include <evl/evl.h>
+#endif
 
 #if (defined(__PX4_DARWIN) || defined(__PX4_CYGWIN) || defined(__PX4_POSIX)) && !defined(__PX4_QURT)
 
+#if !defined(__PX4_EVL4)
 #include <px4_platform_common/posix.h>
 
 int px4_sem_init(px4_sem_t *s, int pshared, unsigned value)
@@ -216,4 +223,177 @@ int px4_sem_destroy(px4_sem_t *s)
 	return 0;
 }
 
+#else // defined(__PX4_EVL4)
+
+#include <px4_platform_common/posix.h>
+
+int px4_sem_init(px4_sem_t *s, int pshared, unsigned value)
+{
+	// We do not used the process shared arg
+	(void)pshared;
+	s->value = value;
+	int ret;
+
+	__Tcall_assert(ret, evl_init());
+	__Tcall_assert(ret, evl_new_event(&(s->wait), nullptr));
+	__Tcall_assert(ret, evl_new_mutex(&(s->lock), nullptr));
+
+#if !defined(__PX4_DARWIN)
+	// We want to use CLOCK_MONOTONIC if possible but we can't on macOS
+	// because it's not available.
+	__Tcall_assert(ret, evl_create_event(&(s->wait), EVL_CLOCK_MONOTONIC, EVL_CLONE_PRIVATE, nullptr));
 #endif
+
+	return 0;
+}
+
+int px4_sem_setprotocol(px4_sem_t *s, int protocol)
+{
+	return 0;
+}
+
+int px4_sem_wait(px4_sem_t *s)
+{
+	int ret = evl_lock_mutex(&(s->lock));
+
+	if (ret) {
+		evl_eprintf("px4_sem_wait: evl_lock_mutex failed: %s, pid: %d\n", strerror(-ret), getpid());
+		return ret;
+	}
+
+	s->value--;
+
+	if (s->value < 0) {
+		ret = evl_wait_event(&(s->wait), &(s->lock));
+
+	} else {
+		ret = 0;
+	}
+
+	if (ret) {
+		PX4_WARN("px4_sem_wait failure");
+	}
+
+	int mret = evl_unlock_mutex(&(s->lock));
+
+	return (ret) ? ret : mret;
+}
+
+int px4_sem_trywait(px4_sem_t *s)
+{
+	int ret = evl_lock_mutex(&(s->lock));
+
+	if (ret) {
+		return ret;
+	}
+
+	if (s->value <= 0) {
+		errno = EAGAIN;
+		ret = -1;
+
+	} else {
+		s->value--;
+	}
+
+	int mret = evl_unlock_mutex(&(s->lock));
+
+	return (ret) ? ret : mret;
+}
+
+int px4_sem_timedwait(px4_sem_t *s, const struct timespec *abstime)
+{
+	int ret = evl_lock_mutex(&(s->lock));
+
+	if (ret) {
+		return ret;
+	}
+
+	s->value--;
+	errno = 0;
+
+	if (s->value < 0) {
+		ret = px4_pthread_cond_timedwait(&(s->wait), &(s->lock), abstime);
+	} else {
+		ret = 0;
+	}
+
+	errno = ret;
+
+	if (ret != 0 && ret != ETIMEDOUT) {
+		setbuf(stdout, nullptr);
+		setbuf(stderr, nullptr);
+		const unsigned NAMELEN = 32;
+		char thread_name[NAMELEN] = {};
+		(void)pthread_getname_np(pthread_self(), thread_name, NAMELEN);
+		PX4_WARN("%s: px4_sem_timedwait failure: ret: %d", thread_name, ret);
+	}
+
+	int mret = evl_unlock_mutex(&(s->lock));
+
+	if (ret || mret) {
+		return -1;
+	}
+
+	return 0;
+}
+
+int px4_sem_post(px4_sem_t *s)
+{
+	int ret = evl_lock_mutex(&(s->lock));
+
+	if (ret) {
+		return ret;
+	}
+
+	s->value++;
+
+	if (s->value <= 0) {
+		ret = evl_signal_event(&(s->wait));
+
+	} else {
+		ret = 0;
+	}
+
+	if (ret) {
+		PX4_WARN("px4_sem_post failure");
+	}
+
+	int mret = evl_unlock_mutex(&(s->lock));
+
+	// return the cond signal failure if present,
+	// else return the mutex status
+	return (ret) ? ret : mret;
+}
+
+int px4_sem_getvalue(px4_sem_t *s, int *sval)
+{
+	int ret = evl_lock_mutex(&(s->lock));
+
+	if (ret) {
+		PX4_WARN("px4_sem_getvalue failure");
+	}
+
+	if (ret) {
+		return ret;
+	}
+
+	*sval = s->value;
+	ret = evl_unlock_mutex(&(s->lock));
+
+	return ret;
+}
+
+int px4_sem_destroy(px4_sem_t *s)
+{
+	int eret;
+	__Tcall_assert(eret, evl_lock_mutex(&(s->lock)));
+	__Tcall_assert(eret ,evl_close_event(&(s->wait)));
+	__Tcall_assert(eret ,evl_unlock_mutex(&(s->lock)));
+	__Tcall_assert(eret ,evl_close_mutex(&(s->lock)));
+
+	return 0;
+}
+
+#endif // !defined(__PX4_EVL4)
+
+#endif // (defined(__PX4_DARWIN) || defined(__PX4_CYGWIN) || defined(__PX4_POSIX)) && !defined(__PX4_QURT)

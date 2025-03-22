@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2019 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2025 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,79 +30,44 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/**
- * @file BlockingList.hpp
- *
- * A blocking intrusive linked list.
- */
-
 #pragma once
 
-#include "IntrusiveSortedList.hpp"
-#include "LockGuard.hpp"
-
-#include <pthread.h>
+#include <string.h>
 #include <stdlib.h>
+#include <evl/proxy.h>
+#include <evl/sched.h>
+#include <evl/thread.h>
 
-#if defined(__PX4_EVL4)
-#include <evl/mutex.h>
-#include <evl/event.h>
-#endif
+#define __stringify_1(x...)	#x
+#define __stringify(x...)	__stringify_1(x)
+#define evl_warn_failed(__fmt, __args...)			\
+	evl_eprintf("%s:%d: FAILED: " __fmt "\n",	\
+			__FILE__, __LINE__, ##__args)
 
-template<class T>
-class BlockingList : public IntrusiveSortedList<T>
-{
-public:
+#define __Tcall(__ret, __call)				\
+	({						\
+		(__ret) = (__call);			\
+		if (__ret < 0) {			\
+			evl_warn_failed("%s (=%s)",		\
+				__stringify(__call),	\
+				strerror(-(__ret)));	\
+		}					\
+		(__ret) >= 0;				\
+	})
 
-	~BlockingList()
-	{
-#if defined(__PX4_EVL4)
-		evl_close_mutex(&_mutex);
-		evl_close_event(&_cv);
-#else
-		pthread_mutex_destroy(&_mutex);
-		pthread_cond_destroy(&_cv);
-#endif
-	}
+#define __Tcall_assert(__ret, __call)		\
+	do {					\
+		if (!__Tcall(__ret, __call))	\
+			exit(__ret);	\
+	} while (0)
 
-	void add(T newNode)
-	{
-		LockGuard lg{_mutex};
-		IntrusiveSortedList<T>::add(newNode);
-	}
-
-	bool remove(T removeNode)
-	{
-		LockGuard lg{_mutex};
-		return IntrusiveSortedList<T>::remove(removeNode);
-	}
-
-	size_t size()
-	{
-		LockGuard lg{_mutex};
-		return IntrusiveSortedList<T>::size();
-	}
-
-	void clear()
-	{
-		LockGuard lg{_mutex};
-		IntrusiveSortedList<T>::clear();
-	}
-
-#if defined(__PX4_EVL4)
-	struct evl_mutex &mutex() { return _mutex; }
-#else
-	pthread_mutex_t &mutex() { return _mutex; }
-#endif
-
-private:
-	#if defined(__PX4_EVL4)
-	struct evl_mutex _mutex = EVL_MUTEX_INITIALIZER(nullptr, EVL_CLOCK_MONOTONIC, 0, EVL_MUTEX_NORMAL);
-	struct evl_event _cv = EVL_EVENT_INITIALIZER(nullptr, EVL_CLOCK_MONOTONIC, EVL_CLONE_PRIVATE);
-	#else
-	pthread_mutex_t	_mutex = PTHREAD_MUTEX_INITIALIZER;
-	pthread_cond_t	_cv = PTHREAD_COND_INITIALIZER;
-	#endif
-
-};
+// Attach to evl core and set thread name, scheduling policy and priority.
+#define __attach_and_setsched(__policy, __prio, __fmt, __args...)		\
+	do {								\
+		int __ret;						\
+		__Tcall_assert(__ret, evl_attach_self(__fmt, ##__args));	\
+		struct evl_sched_attrs __attrs;				\
+		__attrs.sched_policy = __policy;				\
+		__attrs.sched_priority = __prio;				\
+		__Tcall_assert(__ret, evl_set_schedattr(__ret, &__attrs));	\
+	} while (0)

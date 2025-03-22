@@ -74,6 +74,13 @@
 #include <px4_platform_common/tasks.h>
 #include <px4_platform_common/posix.h>
 
+#ifdef __PX4_EVL4
+#include <px4_platform_common/evl_helper.h>
+#include <evl/evl.h>
+#include <evl/thread.h>
+#include <evl/sched.h>
+#endif
+
 #include "apps.h"
 #include "px4_daemon/client.h"
 #include "px4_daemon/server.h"
@@ -114,6 +121,39 @@ static std::string file_basename(std::string const &pathname);
 static std::string pwd();
 static int change_directory(const std::string &directory);
 
+#ifdef __PX4_EVL4
+// Out-of-band thread entry for px4::init_once,
+void* px4_init_once_adapter(void *) {
+	// Attach and Set evl sched policy and prio
+	__attach_and_setsched(SCHED_FIFO, 99, "px4_init_once:%d", getpid());
+	px4::init_once();
+	return nullptr;
+}
+
+// Entry arg structure for run_startup_script
+struct run_startup_script_args {
+	std::string commands_file;
+	std::string absolute_binary_path;
+	int instance;
+};
+
+//Out-of-band thread entry for run_startup_script
+void* px4_run_startup_script_adapter(void *arg) {
+	__attach_and_setsched(SCHED_FIFO, 99, "run_startup_script:%d", getpid());
+	struct run_startup_script_args *args = (struct run_startup_script_args *)arg;
+	run_startup_script(args->commands_file, args->absolute_binary_path, args->instance);
+	delete args;
+	return nullptr;
+}
+
+// Out-of-band thread entry for Pxh::run_pxh()
+void* px4_run_pxh(void *arg) {
+	__attach_and_setsched(SCHED_FIFO, 99, "pxh");
+	px4_daemon::Pxh *pxh = (px4_daemon::Pxh *)arg;
+	pxh->run_pxh();
+	return nullptr;
+}
+#endif
 
 #ifdef __PX4_SITL_MAIN_OVERRIDE
 int SITL_MAIN(int argc, char **argv);
@@ -198,6 +238,11 @@ int main(int argc, char **argv)
 
 #endif // (_POSIX_MEMLOCK > 0) && !ENABLE_LOCKSTEP_SCHEDULER
 
+#ifdef __PX4_EVL4
+		// evl init
+		int eret;
+		__Tcall_assert(eret, evl_init());
+#endif
 		/* Server/daemon apps need to parse the command line arguments. */
 		std::string data_path{};
 		std::string working_directory{};
@@ -350,7 +395,15 @@ int main(int argc, char **argv)
 			return ret;
 		}
 
+#ifdef __PX4_EVL4
+		// Run init_once out-of-band
+		pthread_t px4_init_once;
+		pthread_create(&px4_init_once, NULL, px4_init_once_adapter, nullptr);
+		pthread_join(px4_init_once, nullptr);
+#else
 		px4::init_once();
+#endif
+
 		px4::init(argc, argv, "px4");
 
 		// Don't set this up until PX4 is up and running
@@ -360,7 +413,19 @@ int main(int argc, char **argv)
 			return ret;
 		}
 
+#ifdef __PX4_EVL4
+		// Run startup script out-of-band
+		struct run_startup_script_args *args = new run_startup_script_args();
+		args->commands_file = commands_file;
+		args->absolute_binary_path = absolute_binary_path;
+		args->instance = instance;
+		pthread_t px4_run_startup_script;
+		pthread_create(&px4_run_startup_script, nullptr, px4_run_startup_script_adapter, args);
+		// Wait for the startup script to finish
+		pthread_join(px4_run_startup_script, nullptr);
+#else
 		ret = run_startup_script(commands_file, absolute_binary_path, instance);
+#endif
 
 		if (ret == 0) {
 			// We now block here until we need to exit.
@@ -368,8 +433,17 @@ int main(int argc, char **argv)
 				wait_to_exit();
 
 			} else {
+				// TODO:
+#ifdef __PX4_EVL4
+				px4_daemon::Pxh pxh;
+				pthread_t px4_run_pxh_thread;
+				pthread_create(&px4_run_pxh_thread, nullptr, px4_run_pxh, &pxh);
+				// Wait for the pxh to finish
+				pthread_join(px4_run_pxh_thread, nullptr);
+#else
 				px4_daemon::Pxh pxh;
 				pxh.run_pxh();
+#endif
 			}
 		}
 

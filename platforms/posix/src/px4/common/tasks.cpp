@@ -36,6 +36,7 @@
  * Implementation of existing task API for Linux
  */
 
+#include <evl/factory-abi.h>
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/defines.h>
 #include <unistd.h>
@@ -58,6 +59,13 @@
 #include <px4_platform_common/tasks.h>
 #include <px4_platform_common/posix.h>
 #include <systemlib/err.h>
+
+#ifdef __PX4_EVL4
+#include <px4_platform_common/evl_helper.h>
+#include <evl/thread.h>
+#include <evl/evl.h>
+#include <signal.h>
+#endif
 
 #define PX4_MAX_TASKS 50
 
@@ -84,6 +92,19 @@ static void *entry_adapter(void *ptr)
 {
 	pthdata_t *data = (pthdata_t *) ptr;
 
+#ifdef __PX4_EVL4
+	/* We do not need to set scheduler policy and priority here, because they are already
+	 * set in px4_task_spawn_cmd.
+	*/
+	int efd;
+	__Tcall_assert(efd, evl_attach_thread(EVL_CLONE_PUBLIC, data->name));
+	// Register the SIGDEBUG handler
+	struct sigaction sa;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_sigaction = evl_sigdebug_handler;
+	sa.sa_flags = SA_SIGINFO;
+	sigaction(SIGDEBUG, &sa, NULL);
+#endif
 	// set the threads name
 #ifdef __PX4_DARWIN
 	int rv = pthread_setname_np(data->name);
