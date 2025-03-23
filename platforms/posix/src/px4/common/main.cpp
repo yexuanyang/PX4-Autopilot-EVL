@@ -433,7 +433,6 @@ int main(int argc, char **argv)
 				wait_to_exit();
 
 			} else {
-				// TODO:
 #ifdef __PX4_EVL4
 				px4_daemon::Pxh pxh;
 				pthread_t px4_run_pxh_thread;
@@ -572,6 +571,14 @@ void register_sig_handler()
 
 	sigaction(SIGTERM, &sig_int, nullptr);
 	sigaction(SIGPIPE, &sig_pipe, nullptr);
+
+#ifdef __PX4_EVL4
+	// Register the SIGDEBUG handler
+	struct sigaction sig_evl {};
+	sig_evl.sa_sigaction = evl_sigdebug_handler;
+	sig_evl.sa_flags = SA_SIGINFO;
+	sigaction(SIGDEBUG, &sig_evl, NULL);
+#endif
 }
 
 void sig_int_handler(int sig_num)

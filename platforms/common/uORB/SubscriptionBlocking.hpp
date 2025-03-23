@@ -153,7 +153,7 @@ public:
 private:
 
 #ifdef __PX4_EVL4
-	struct evl_mutex _mutex = EVL_MUTEX_INITIALIZER(nullptr, EVL_CLOCK_MONOTONIC, 90, EVL_MUTEX_NORMAL);
+	struct evl_mutex _mutex = EVL_MUTEX_INITIALIZER(nullptr, EVL_CLOCK_MONOTONIC, 0, EVL_MUTEX_NORMAL);
 	struct evl_event _cv = EVL_EVENT_INITIALIZER(nullptr, EVL_CLOCK_MONOTONIC, EVL_CLONE_PRIVATE);
 #else
 	pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;

@@ -92,19 +92,6 @@ static void *entry_adapter(void *ptr)
 {
 	pthdata_t *data = (pthdata_t *) ptr;
 
-#ifdef __PX4_EVL4
-	/* We do not need to set scheduler policy and priority here, because they are already
-	 * set in px4_task_spawn_cmd.
-	*/
-	int efd;
-	__Tcall_assert(efd, evl_attach_thread(EVL_CLONE_PUBLIC, data->name));
-	// Register the SIGDEBUG handler
-	struct sigaction sa;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_sigaction = evl_sigdebug_handler;
-	sa.sa_flags = SA_SIGINFO;
-	sigaction(SIGDEBUG, &sa, NULL);
-#endif
 	// set the threads name
 #ifdef __PX4_DARWIN
 	int rv = pthread_setname_np(data->name);
@@ -115,6 +102,18 @@ static void *entry_adapter(void *ptr)
 	if (rv) {
 		PX4_ERR("px4_task_spawn_cmd: failed to set name of thread %d %d\n", rv, errno);
 	}
+
+#ifdef __PX4_EVL4
+	/* We do not need to set scheduler policy and priority here, because they are already
+	 * set in px4_task_spawn_cmd.
+	*/
+	int efd;
+	__Tcall_assert(efd, evl_attach_thread(EVL_CLONE_PUBLIC, data->name));
+	// TODO: ONLY FOR DEBUG: Set thread mode
+	if (strcmp(data->name, "pxh") == 0) {
+		__Tcall_assert(efd, evl_set_thread_mode(efd, EVL_T_WOSS | EVL_T_HMSIG, nullptr));
+	}
+#endif
 
 	data->entry(data->argc, data->argv);
 	free(ptr);

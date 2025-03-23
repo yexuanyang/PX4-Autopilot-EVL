@@ -61,11 +61,21 @@
 
 
 #define system_exit exit
+
+#ifdef __PX4_EVL4
+#include <evl/clock.h>
+#define system_clock_gettime evl_read_clock
+#define system_clock_settime evl_set_clock
+#define system_pthread_cond_timedwait evl_timedwait_event
+#define system_usleep evl_usleep
+#define system_sleep(__sec) evl_usleep((__sec) * 1000000)
+#else
 #define system_clock_gettime clock_gettime
 #define system_clock_settime clock_settime
 #define system_pthread_cond_timedwait pthread_cond_timedwait
 #define system_usleep usleep
 #define system_sleep sleep
+#endif
 
 #ifndef PX4_DISABLE_GCC_POISON
 
@@ -97,7 +107,9 @@
 // symbols in cannode.
 // We can't include this for Qurt because it uses it's own thread primitives
 #endif // !defined(__PX4_NUTTX) && !defined(__PX4_QURT)
-#define system_pthread_cond_timedwait pthread_cond_timedwait
+#if !defined(__PX4_EVL4)
+#define system_pthread_ond_timedwait pthread_cond_timedwait
+#endif //!defined(__PX4_EVL4)
 /* We can't poison pthread_cond_timedwait because it seems to be used in the
  * <string> include. */
 
